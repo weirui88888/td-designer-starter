@@ -1,0 +1,118 @@
+name: Build and Show Dist Tree
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  prepare-dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'latest'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build mockSite project
+        run: npm run build:mockSite
+
+      - name: Copy stats.html to dist
+        run: |
+          echo "📄 拷贝 stats.html 到 dist 目录..."
+          cp stats.html dist/
+
+      - name: Show dist directory structure
+        run: |
+          echo "📁 dist 文件树如下："
+          tree -a -L 3 dist || find
+
+      - name: Show total size of dist directory
+        run: |
+          echo "📏 dist 总大小如下："
+          du -sh dist
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-folder
+          path: dist/
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: prepare-dist
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-folder
+          path: dist/
+
+      - name: Show full project directory structure
+        run: |
+          echo "📁 当前工作目录结构："
+          tree -L 1
+
+      - name: Build Docker image
+        run: docker build -t ewm-designer:latest .
+
+      - name: List Docker images
+        run: docker images
+
+      - name: Save Docker image to tar
+        run: docker save -o ewm-designer.tar ewm-designer:latest
+
+      - name: Upload image tar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ewm-designer-tar
+          path: ewm-designer.tar
+
+  deploy-server:
+    runs-on: ubuntu-latest
+    needs: docker-build
+
+    steps:
+      - name: Download docker image tar
+        uses: actions/download-artifact@v4
+        with:
+          name: ewm-designer-tar
+          path: ./
+
+      - name: List top level to confirm tar exists
+        run: ls -lh
+
+      - name: Copy image to remote server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          password: ${{ secrets.REMOTE_PASSWORD }}
+          port: 22
+          source: 'ewm-designer.tar'
+          target: '~/'
+
+      - name: Load and run Docker image on remote server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          password: ${{ secrets.REMOTE_PASSWORD }}
+          port: 22
+          script: |
+            docker load -i ~/ewm-designer.tar
+            docker stop ewm-designer-app || true
+            docker rm ewm-designer-app || true
+            docker run -d -p 8686:8686 --name ewm-designer-app ewm-designer:latest
+            docker image prune -f
