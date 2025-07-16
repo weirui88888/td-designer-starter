@@ -1,5 +1,5 @@
 export default {
-  loginTitle: '支付宝',
+  loginTitle: '后台',
   noAccount: '没有账号吗?',
   existAccount: '已有账号?',
   createAccount: '注册新账号',

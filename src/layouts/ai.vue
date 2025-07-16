@@ -108,6 +108,7 @@ const fetchSSE = async (fetchFn, options) => {
   fetchCancel.value = controller;
 
   const response = await fetchFn(controller.signal);
+  console.log(response);
   const { success, fail, complete } = options;
 
   if (!response.ok) {
@@ -120,8 +121,6 @@ const fetchSSE = async (fetchFn, options) => {
   const decoder = new TextDecoder();
   if (!reader) return;
 
-  let buffer = '';
-
   reader.read().then(function processText({ done, value }) {
     if (done) {
       complete?.(true);
@@ -129,26 +128,24 @@ const fetchSSE = async (fetchFn, options) => {
     }
 
     const chunk = decoder.decode(value, { stream: true });
-    buffer += chunk;
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
+    // NOTE 这里chunk.split('\n');是因为有的情况下，读取到的字符串并不是一个对象字符串，而是类似于下面的字符串
+    // {"model":"smollm:135m","created_at":"2025-07-16T02:41:16.837456638Z","response":".","done":false}
+    // {"model":"smollm:135m","created_at":"2025-07-16T02:41:16.948700111Z","response":" He","done":false}
+    // {"model":"smollm:135m","created_at":"2025-07-16T02:41:17.060607347Z","response":" had","done":false}
+    const lines = chunk.split('\n');
     for (const line of lines) {
-      try {
-        if (!line.trim()) continue;
-        const json = JSON.parse(line);
-        if (json.response) {
-          success({ data: json.response });
+      if (line.trim()) {
+        try {
+          const json = JSON.parse(line);
+          if (json.response) {
+            success({ data: json.response });
+          }
+          // 处理 obj
+        } catch (e) {
+          console.error('JSON解析失败:', line, e);
         }
-        if (json.done) {
-          complete?.(true);
-        }
-      } catch (err) {
-        console.warn('解析失败:', line);
       }
     }
-
     reader.read().then(processText);
   });
 };
